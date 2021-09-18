@@ -23,7 +23,7 @@ class StickerService:
         self.loop = asyncio.get_event_loop()
         self.max_size = pool_size
         self.pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
-        self.dl_pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
+        # self.dl_pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
 
     async def prepare(self):
         for i in range(self.max_size):
@@ -32,10 +32,10 @@ class StickerService:
                 await self.pool.put(
                     await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
                 )
-                print("create dl connection {}-{}".format(i, k))
-                await self.dl_pool.put(
-                    await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
-                )
+                # print("create dl connection {}-{}".format(i, k))
+                # await self.dl_pool.put(
+                #     await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
+                # )
 
     async def get_sticker(self, reader, writer):
         payload_size = await reader.readexactly(1)
@@ -106,9 +106,11 @@ class StickerService:
                 sticker = _sticker
                 break
 
-        client = await self.dl_pool.get()
+        # client = await self.dl_pool.get()
+        client = await self.pool.get()
         result = await self.__dl(sticker, path, client)
-        await self.dl_pool.put(client)
+        # await self.dl_pool.put(client)
+        await self.pool.put(client)
         writer.write(int(result is None).to_bytes(1, 'big'))
         await writer.drain()
 
@@ -126,17 +128,21 @@ class StickerService:
         sticker_set = await client(functions.messages.GetStickerSetRequest(types.InputStickerSetShortName(sticker_name)))
         await self.pool.put(client)
 
-        client = await self.dl_pool.get()
-        print("dl pool size: {}".format(self.dl_pool.qsize()))
+        # client = await self.dl_pool.get()
+        client = await self.pool.get()
+        # print("dl pool size: {}".format(self.dl_pool.qsize()))
+        print("dl pool size: {}".format(self.pool.qsize()))
         paths = pickle.loads(payload)
         tasks = [
             asyncio.create_task(self.__dl(sticker, paths.get(sticker.id), client)) for sticker in sticker_set.documents
         ]
         t0 = time.time()
         result = await asyncio.gather(*tasks)
-        await self.dl_pool.put(client)
+        # await self.dl_pool.put(client)
+        await self.pool.put(client)
         print("download pack {} in {} sec".format(sticker_name, time.time() - t0))
-        print("dl pool size: {}".format(self.dl_pool.qsize()))
+        # print("dl pool size: {}".format(self.dl_pool.qsize()))
+        print("dl pool size: {}".format(self.pool.qsize()))
 
         failures = list(filter(lambda z: z is not None, result))
         pickled = pickle.dumps(failures)
