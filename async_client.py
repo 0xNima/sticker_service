@@ -113,7 +113,7 @@ async def do(st_name):
     path = {}
     map_ = {}
     for sticker in sticker_set.documents:
-        path[sticker.id] = "{}/{}.webp".format(base, sticker.id)
+        path[sticker.id] = "stickers/{}/{}.webp".format(base, sticker.id)
         map_[sticker.id] = sticker
 
     t0 = time.time()
