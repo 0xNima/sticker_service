@@ -1,10 +1,13 @@
+import asyncio
 import pickle
 import socket
+import time
+
 from config import SOCKET_FILE_PATH
 import sys
 
 
-def get_sticker(sticker_name):
+async def get_sticker(sticker_name):
     sticker_name = sticker_name.encode()
     sticker_size = len(sticker_name)
     payload = bytearray(2 + sticker_size)
@@ -12,34 +15,34 @@ def get_sticker(sticker_name):
     payload[1] = sticker_size
     payload[2:] = sticker_name
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.connect(SOCKET_FILE_PATH)
+    reader, writer = await asyncio.open_unix_connection(SOCKET_FILE_PATH)
 
-    server.sendall(payload)
+    writer.write(payload)
+    await writer.drain()
 
     buffer_size = 1024
     payload = b''
 
-    info = server.recv(5)
+    info = await reader.readexactly(5)
     error = info[0]
     if error:
         code = int(info[1:].hex(), 16)
         print("error code: {}".format(code))
-        server.close()
-        exit()
+        writer.close()
+        return code
 
     size = int(info[1:].hex(), 16)
     read = 0
     while read < size:
-        chunk = server.recv(buffer_size)
-        read += buffer_size
+        chunk = await reader.read(buffer_size)
+        read += len(chunk)
         payload += chunk
 
-    server.close()
+    writer.close()
     return pickle.loads(payload)
 
 
-def dl_sticker_set(sticker_name, paths):
+async def dl_sticker_set(sticker_name, paths):
     pickled = pickle.dumps(paths)
     sticker_name = sticker_name.encode()
 
@@ -49,26 +52,26 @@ def dl_sticker_set(sticker_name, paths):
     payload[1] = len(sticker_name)
     payload[2:len(sticker_name) + 2] = sticker_name
     payload[len(sticker_name) + 2: len(sticker_name) + 6] = len(pickled).to_bytes(4, 'big')
-
     payload[len(sticker_name) + 6:] = pickled
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.connect(SOCKET_FILE_PATH)
-    server.sendall(payload)
+    reader, writer = await asyncio.open_unix_connection(SOCKET_FILE_PATH)
 
-    size = int(server.recv(4).hex(), 16)
+    writer.write(payload)
+    await writer.drain()
+
+    size = int((await reader.readexactly(4)).hex(), 16)
     read = 0
     buffer_size = 1024
     msg = b''
     while read < size:
-        chunk = server.recv(buffer_size)
-        read += buffer_size
+        chunk = await reader.read(buffer_size)
+        read += len(chunk)
         msg += chunk
-    server.close()
+    writer.close()
     return pickle.loads(msg)
 
 
-def dl_sticker(sticker_name, identifier, paths):
+async def dl_sticker(sticker_name, identifier, paths):
     sticker_name = sticker_name.encode()
     lsn = len(sticker_name)
 
@@ -88,25 +91,46 @@ def dl_sticker(sticker_name, identifier, paths):
     payload[lsn + lp + 6] = li
     payload[lsn + lp + 7:] = identifier
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.connect(SOCKET_FILE_PATH)
-    server.sendall(payload)
+    reader, writer = await asyncio.open_unix_connection(SOCKET_FILE_PATH)
 
-    result = int(server.recv(1).hex(), 16)
-    server.close()
+    writer.write(payload)
+    await writer.drain()
+
+    result = int((await reader.readexactly(1)).hex(), 16)
+    writer.close()
     return bool(result)
 
 
-if __name__ == '__main__':
-    st_name = sys.argv[1]
-    sticker_set = get_sticker(st_name)
+async def do(st_name):
+    t0 = time.time()
+    sticker_set = await get_sticker(st_name)
+    print("get sticker set {} in {} sec".format(st_name, time.time() - t0))
+    if isinstance(sticker_set, int):
+        print(sticker_set)
+        return
+
     base = sticker_set.set.id
     path = {}
     map_ = {}
     for sticker in sticker_set.documents:
         path[sticker.id] = "{}/{}.webp".format(base, sticker.id)
         map_[sticker.id] = sticker
-    failures = dl_sticker_set(st_name, path)
-    print(failures)
-    for id_ in failures:
-        print(dl_sticker(st_name, id_, path.get(id_)))
+
+    t0 = time.time()
+    failures = await dl_sticker_set(st_name, path)
+    print("download sticker {} in {} sec - failures: {}".format(st_name, time.time() - t0, failures))
+    # for id_ in failures:
+    #     print(await dl_sticker(st_name, id_, path.get(id_)))
+
+
+async def main():
+    file = open('/home/nima/Desktop/links.txt', 'r')
+    tasks = []
+    for i, sticker_name in enumerate(file.readlines()):
+        tasks.append(asyncio.create_task(do(sticker_name.strip())))
+    await asyncio.gather(*tasks)
+
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
