@@ -1,10 +1,8 @@
 import asyncio
 import pickle
-import socket
 import time
 
 from config import SOCKET_FILE_PATH
-import sys
 
 
 async def get_sticker(sticker_name):
@@ -71,12 +69,12 @@ async def dl_sticker_set(sticker_name, paths):
     return pickle.loads(msg)
 
 
-async def dl_sticker(sticker_name, identifier, paths):
+async def dl_sticker(sticker_name, identifier, path):
     sticker_name = sticker_name.encode()
     lsn = len(sticker_name)
 
-    pickled = pickle.dumps(paths)
-    lp = len(pickled)
+    path = path.encode()
+    lp = len(path)
 
     identifier = hex(identifier).encode()
     li = len(identifier)
@@ -86,10 +84,10 @@ async def dl_sticker(sticker_name, identifier, paths):
     payload[0] = 0x03   # function code
     payload[1] = lsn
     payload[2:lsn + 2] = sticker_name
-    payload[lsn + 2: lsn + 6] = lp.to_bytes(4, 'big')
-    payload[lsn + 6: lsn + lp + 6] = pickled
-    payload[lsn + lp + 6] = li
-    payload[lsn + lp + 7:] = identifier
+    payload[lsn + 2: lsn + 4] = lp.to_bytes(4, 'big')
+    payload[lsn + 4: lsn + lp + 4] = path
+    payload[lsn + lp + 4] = li
+    payload[lsn + lp + 5:] = identifier
 
     reader, writer = await asyncio.open_unix_connection(SOCKET_FILE_PATH)
 
@@ -110,23 +108,24 @@ async def do(st_name):
         return
 
     base = sticker_set.set.id
-    path = {}
-    map_ = {}
+    path = {'0': {}, '1': {}}
+
     for sticker in sticker_set.documents:
-        path[sticker.id] = "stickers/{}/{}.webp".format(base, sticker.id)
-        map_[sticker.id] = sticker
+        path['0'][sticker.id] = "stickers/{}/{}.webp".format(base, sticker.id)
 
     t0 = time.time()
     failures = await dl_sticker_set(st_name, path)
     print("download sticker {} in {} sec - failures: {}".format(st_name, time.time() - t0, failures))
-    # for id_ in failures:
-    #     print(await dl_sticker(st_name, id_, path.get(id_)))
+    for id_ in failures:
+        print(await dl_sticker(st_name, id_, path.get(id_)))
 
 
 async def main():
     file = open('/home/nima/Desktop/links.txt', 'r')
     tasks = []
     for i, sticker_name in enumerate(file.readlines()):
+        if i == 3:
+            break
         tasks.append(asyncio.create_task(do(sticker_name.strip())))
     await asyncio.gather(*tasks)
 
