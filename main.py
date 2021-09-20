@@ -49,6 +49,7 @@ class StickerService:
         client = await self.pool.get()
         try:
             sticker = await client(functions.messages.GetStickerSetRequest(types.InputStickerSetShortName(sticker_name)))
+            await self.pool.put(client)
             code = int(sticker.set.animated)
         except StickersetInvalidError:
             code = 2
