@@ -20,11 +20,12 @@ class StickerService:
         dl_sticker = 0x03
         get_sticker_code = 0x04
 
-    def __init__(self, pool_size=1):
+    def __init__(self, pool_size=1, enable_dl_pool=False):
         self.loop = asyncio.get_event_loop()
         self.max_size = pool_size
         self.pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
-        self.dl_pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
+        if enable_dl_pool:
+            self.dl_pool = asyncio.Queue(maxsize=pool_size * len(config.BOT_TOKEN))
 
     async def prepare(self):
         for i in range(self.max_size):
@@ -33,10 +34,11 @@ class StickerService:
                 await self.pool.put(
                     await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
                 )
-                print("create dl connection {}-{}".format(i, k))
-                await self.dl_pool.put(
-                    await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
-                )
+                if hasattr(self, 'dl_pool'):
+                    print("create dl connection {}-{}".format(i, k))
+                    await self.dl_pool.put(
+                        await TelegramClient('', api_id=config.API_ID, api_hash=config.API_HASH).start(bot_token=v)
+                    )
 
     async def get_sticker_code(self, reader, writer):
         payload_size = await reader.readexactly(1)
